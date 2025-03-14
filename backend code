@@ -1,0 +1,61 @@
+import asyncio
+import websockets
+import pandas as pd
+import numpy as np
+from sentence_transformers import SentenceTransformer, util
+
+# Load chatbot dataset from CSV
+df = pd.read_csv("TC_DATA.csv")
+
+# Ensure the CSV has correct columns
+if 'question' not in df.columns or 'answer' not in df.columns:
+    raise KeyError("Ensure the CSV file contains 'question' and 'answer' columns.")
+
+# Load Sentence Transformer model
+print("Loading model...")
+model = SentenceTransformer("all-MiniLM-L6-v2")
+print("Model loaded successfully!")
+
+# Encode all questions into embeddings
+print("Encoding questions...")
+question_embeddings = model.encode(df['question'].tolist())
+print("Encoding complete!")
+
+def get_answer(user_question):
+    """
+    Finds the best response using cosine similarity.
+    """
+    user_embedding = model.encode([user_question])
+    cos_scores = util.cos_sim(user_embedding, question_embeddings)[0]
+    top_index = int(np.argmax(cos_scores))
+
+    # Similarity threshold
+    if cos_scores[top_index] > 0.6:
+        return df.iloc[top_index]['answer']
+    else:
+        return "I'm sorry, I don't have information about that. Please contact admissions@college.edu."
+
+async def chatbot(websocket, path):
+    """
+    Handles WebSocket connections.
+    """
+    async for message in websocket:
+        print(f"Received: {message}")
+        response = get_answer(message)
+        await websocket.send(response)
+
+async def start_server():
+    server = await websockets.serve(chatbot, "localhost", 8765)
+    print("Chatbot WebSocket server started on ws://localhost:8765")
+    await server.wait_closed()
+
+# ✅ Correct Event Loop Handling
+if __name__ == "__main__":
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(start_server())
+    except RuntimeError as e:
+        print("Restarting event loop...")
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        new_loop.run_until_complete(start_server())
